@@ -212,16 +212,15 @@ public class DestroyAi extends SpellAbilityAi {
                     if (!sa.isMinTargetChosen() || sa.isZeroTargets()) {
                         sa.resetTargets();
                         return new AiAbilityDecision(0, AiPlayDecision.TargetingFailed);
-                    } else {
-                        // TODO is this good enough? for up to amounts?
-                        break;
                     }
+                    // TODO is this good enough? for up to amounts?
+                    break;
                 }
 
-                Card choice = null;
+                Card choice;
                 // If the targets are only of one type, take the best
                 if (CardLists.getNotType(list, "Creature").isEmpty()) {
-                    choice = ComputerUtilCard.getBestCreatureAI(list);
+                    choice = ComputerUtilCard.getBestRemovalTargetAI(ai, list);
                     if ("OppDestroyYours".equals(logic)) {
                         Card aiBest = ComputerUtilCard.getBestCreatureAI(ai.getCreaturesInPlay());
                         if (ComputerUtilCard.evaluateCreature(aiBest) > ComputerUtilCard.evaluateCreature(choice) - 40) {
@@ -239,7 +238,7 @@ public class DestroyAi extends SpellAbilityAi {
                     }
                 } else {
                     // TODO look for "exiled until leaves" of own stuff
-                    choice = ComputerUtilCard.getMostExpensivePermanentAI(list);
+                    choice = ComputerUtilCard.getBestRemovalTargetAI(ai, list);
                 }
                 //option to hold removal instead only applies for single targeted removal
                 if (!sa.isTrigger() && sa.getMaxTargets() == 1) {
@@ -382,7 +381,7 @@ public class DestroyAi extends SpellAbilityAi {
                         return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
                     }
                 } else {
-                    Card c = ComputerUtilCard.getBestAI(preferred);
+                    Card c = ComputerUtilCard.getBestRemovalTargetAI(ai, preferred);
 
                     if (sa.canTarget(c)) {
                         sa.getTargets().add(c);
