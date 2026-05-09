@@ -1463,6 +1463,16 @@ public class ChangeZoneAi extends SpellAbilityAi {
             }
         }
 
+        // Can we extract this up to SPellAbilityAi for everything to have access to?
+        Card keycardFound = null;
+        for(String keyName : keyCards) {
+            CardCollection withKeyCard = CardLists.filter(fetchList, CardPredicates.nameEquals(keyName));
+            if (withKeyCard.isEmpty()) {
+                continue;
+            }
+            keycardFound = withKeyCard.getFirst();
+        }
+
         if (sa.hasParam("AILogic")) {
             String logic = sa.getParamOrDefault("AILogic", "");
             if ("NeverBounceItself".equals(logic)) {
@@ -1474,6 +1484,8 @@ public class ChangeZoneAi extends SpellAbilityAi {
             } else if ("WorstCard".equals(logic)) {
                 return ComputerUtilCard.getWorstAI(fetchList);
             } else if ("BestCard".equals(logic)) {
+                if (keycardFound != null) return keycardFound;
+
                 return ComputerUtilCard.getBestAI(fetchList); // generally also means the most expensive one or close to it
             } else if ("Mairsil".equals(logic)) {
                 return SpecialCardAi.MairsilThePretender.considerCardFromList(fetchList);
@@ -1504,6 +1516,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
         CardLists.shuffle(fetchList);
         // Save a card as a default, in case we can't find anything suitable.
         Card first = fetchList.get(0);
+
         if (ZoneType.Battlefield.equals(destination)) {
             fetchList = CardLists.filter(fetchList, c1 -> {
                 if (c1.getType().isLegendary()) {
@@ -1539,13 +1552,19 @@ public class ChangeZoneAi extends SpellAbilityAi {
                 }
             }
         } else if (origin.contains(ZoneType.Library) && (type.contains("Basic") || areAllBasics(type))) {
+            if (keycardFound != null) return keycardFound;
+
             c = basicManaFixing(decider, fetchList);
         } else if (ZoneType.Hand.equals(destination) && CardLists.getNotType(fetchList, "Creature").isEmpty()) {
+            if (keycardFound != null) return keycardFound;
+
             c = chooseCreature(decider, fetchList);
         } else if (ZoneType.Battlefield.equals(destination) || ZoneType.Graveyard.equals(destination)) {
             if (!activator.equals(decider) && sa.hasParam("GainControl")) {
                 c = ComputerUtilCard.getWorstAI(fetchList);
             } else {
+                if (keycardFound != null) return keycardFound;
+
                 c = ComputerUtilCard.getBestAI(fetchList);
             }
         } else {
@@ -1556,13 +1575,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
             }
 
             // Tutor for the first key card in the list, since the list should be in priority order
-            for(String keyName : keyCards) {
-                CardCollection withKeyCard = CardLists.filter(fetchList, CardPredicates.nameEquals(keyName));
-                if (withKeyCard.isEmpty()) {
-                    continue;
-                }
-                return withKeyCard.getFirst();
-            }
+            if (keycardFound != null) return keycardFound;
 
             // Does AI need a land?
             // The logic here seems wrong if the decider isn't the same as the player
