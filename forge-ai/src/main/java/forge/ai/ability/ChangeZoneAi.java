@@ -1503,6 +1503,12 @@ public class ChangeZoneAi extends SpellAbilityAi {
                 return doExilePreferenceLogic(decider, sa, fetchList);
             } else if (logic.equals("BounceOwnTrigger")) {
                 return doBounceOwnTriggerLogic(decider, sa, fetchList);
+            } else if (logic.equals("ConsiderRamp")) {
+                Card c = considerRamp(decider, sa, fetchList, keycardFound);
+
+                if (c != null) {
+                    return c;
+                }
             }
         }
         if (fetchList.isEmpty()) {
@@ -2049,6 +2055,53 @@ public class ChangeZoneAi extends SpellAbilityAi {
             return ComputerUtilCard.getWorstAI(unprefChoices);
         }
         return null;
+    }
+
+    private static Card considerRamp(Player ai, SpellAbility sa, CardCollection choices, Card keycardFound) {
+        // For cards that might fetch a land or other things, but really might need the land right now.
+        // Do a rough check of available mana sources (lands on battlefield, other mana producers on battlefield,
+        // and lands in hand) to decide whether to prioritize fetching a land.
+
+        // Count lands already on the battlefield
+        int landsOnBattlefield = ai.getLandsInPlay().size();
+
+        // Count non-land permanents on the battlefield that produce mana (e.g. mana rocks, dorks)
+        int otherManaProducers = 0;
+        for (Card c : ai.getCardsIn(ZoneType.Battlefield)) {
+            if (!c.getManaAbilities().isEmpty()) {
+                otherManaProducers++;
+            }
+        }
+
+        // Count lands in hand (they represent future mana sources we expect to play)
+        int landsInHand = CardLists.filter(ai.getCardsIn(ZoneType.Hand), CardPredicates.LANDS).size();
+
+        int totalManaSources = landsOnBattlefield + otherManaProducers + landsInHand;
+
+        // Base threshold: below this many total mana sources we should prioritize getting a land
+        int threshold = 4;
+
+        // If we have a keycard target, also make sure we'll eventually have enough mana to cast it.
+        // If the keycard's CMC is further than one land drop away from our current sources, keep ramping.
+        if (keycardFound != null && keycardFound.getCMC() > totalManaSources + 1) {
+            threshold = Math.max(threshold, keycardFound.getCMC() - 1);
+        }
+
+        // If we are below the threshold, look for a land in the available choices and prefer it
+        if (totalManaSources < threshold) {
+            CardCollection landsInChoices = CardLists.filter(choices, CardPredicates.LANDS);
+            if (!landsInChoices.isEmpty()) {
+                // Prefer a land that produces mana over a purely tapped/utility land
+                CardCollection manaLands = CardLists.filter(landsInChoices, CardPredicates.LANDS_PRODUCING_MANA);
+                if (!manaLands.isEmpty()) {
+                    return manaLands.get(0);
+                }
+                return landsInChoices.get(0);
+            }
+        }
+
+        // We have enough mana sources — let the caller use keycardFound (may be null, triggering fallthrough)
+        return keycardFound;
     }
 
     @Override
