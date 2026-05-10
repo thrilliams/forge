@@ -1125,6 +1125,106 @@ public class ComputerUtil {
         return false;
     }
 
+    /**
+     * Sorts a hand (CardCollection) by discard preference.
+     * <p>
+     * Cards at the <b>front</b> of the list (index 0) are the most valuable and should be
+     * protected from discard: strong permanents such as planeswalkers and powerful creatures.
+     * Cards at the <b>end</b> of the list are the most expendable and are preferred discard
+     * targets: excess or weak lands, cards with the {@code DiscardMe} SVar, and cards that
+     * are too expensive to cast in the near future.
+     * <p>
+     * Cards that derive strategic value from being discarded (e.g. reanimator targets marked
+     * with {@code IsReanimatorCard}) are ranked slightly below their raw power to reflect that
+     * discarding them carries upside, while still keeping them away from the very bottom.
+     * <p>
+     * When choosing a card to discard, iterate from the end of the sorted list.
+     *
+     * @param ai   the AI player whose hand is being sorted
+     * @param hand the hand to sort in-place
+     */
+    public static void sortHandByDiscardPreference(final Player ai, final CardCollection hand) {
+        final CardCollection landsInPlay = CardLists.filter(
+                ai.getCardsIn(ZoneType.Battlefield), CardPredicates.LANDS_PRODUCING_MANA);
+        final CardCollection landsInHand = CardLists.filter(hand, CardPredicates.LANDS);
+        final CardCollection nonLandsInHand = CardLists.getNotType(hand, "Land");
+
+        final int numLandsInPlay = landsInPlay.size();
+        final int numLandsInHand = landsInHand.size();
+        final int numNonLandsInHand = nonLandsInHand.size();
+        // The highest CMC spell in hand sets the "target mana" — we want enough lands to cast it
+        final int highestCMC = nonLandsInHand.isEmpty() ? 0 : Aggregates.max(nonLandsInHand, Card::getCMC);
+
+        hand.sort(Comparator.comparingInt((Card c) ->
+                scoreCardForDiscardSort(ai, c, numLandsInPlay, numLandsInHand, numNonLandsInHand, highestCMC))
+                .reversed());
+    }
+
+    /**
+     * Assigns a "keep value" score for use in {@link #sortHandByDiscardPreference}.
+     * Higher score → card is more valuable to hold → appears earlier in the sorted list.
+     */
+    private static int scoreCardForDiscardSort(final Player ai, final Card c,
+            final int numLandsInPlay, final int numLandsInHand,
+            final int numNonLandsInHand, final int highestCMC) {
+
+        // Explicit SVars always win
+        if (c.hasSVar("DiscardMe")) {
+            // Card script specifically asks to be discarded: sink it to the very end
+            return -500;
+        }
+        if (c.hasSVar("DoNotDiscardIfAble")) {
+            // Card script says never discard this if avoidable: float it to the very front
+            return 2000;
+        }
+
+        // ---- Lands ----
+        if (c.isLand()) {
+            // Mirror the "excess land" heuristic from isWorseThanDraw()
+            boolean isExcessLand = numLandsInPlay >= Math.max(highestCMC, 6)
+                    || (numLandsInPlay + numLandsInHand > 6 && numLandsInHand > 1)
+                    || (numLandsInPlay > 3 && numNonLandsInHand == 0);
+            if (isExcessLand) {
+                // Weaker/excess lands sit at the end — prime discard candidates
+                return c.isBasicLand() ? 15 : 25; // non-basics slightly better even when excess (color fixing)
+            }
+            // We still need this land: keep it, but below any castable spell
+            return c.isBasicLand() ? 70 : 90;
+        }
+
+        // ---- Non-land permanents and spells ----
+        int score;
+        if (c.isPlaneswalker()) {
+            // Planeswalkers are among the strongest permanents — protect them
+            score = 700 + c.getCMC() * 15;
+            // Current loyalty indicates how close to ultimate / how immediately threatening
+            score += c.getCounters(CounterEnumType.LOYALTY) * 5;
+        } else if (c.isCreature()) {
+            // Use the dedicated creature evaluator for a realistic power estimate
+            score = 300 + ComputerUtilCard.evaluateCreature(c);
+        } else if (c.isEnchantment() || c.isArtifact()) {
+            // Non-creature permanents: value by CMC
+            score = 200 + c.getCMC() * 12;
+        } else {
+            // Instants and sorceries
+            score = 130 + c.getCMC() * 8;
+        }
+
+        // Reanimator targets: discarding them has strategic upside (graveyard recursion), so
+        // nudge them slightly toward the end among otherwise similarly-valued cards
+        if (c.hasSVar("IsReanimatorCard")) {
+            score -= 40;
+        }
+
+        // Cards we cannot cast for at least two more turns are less valuable to hold right now
+        if (!c.hasProperty("hasXCost", ai, null, null)
+                && c.getCMC() > numLandsInPlay + numLandsInHand + 2) {
+            score -= 90;
+        }
+
+        return score;
+    }
+
     // returns true if it's better to wait until blockers are declared
     public static boolean waitForBlocking(final SpellAbility sa) {
         final Game game = sa.getActivatingPlayer().getGame();
@@ -2293,7 +2393,18 @@ public class ComputerUtil {
     }
 
     public static CardCollection getCardsToDiscardFromOpponent(Player chooser, Player discarder, SpellAbility sa, CardCollection validCards, int min, int max) {
+        List<String> keyCards = discarder.getRegisteredPlayer().getDeck().getKeyCards();
+
+        CardCollection greatChoices = CardLists.filter(validCards, c -> keyCards.contains(c.getName()));
         CardCollection goodChoices = CardLists.filter(validCards, c -> !c.hasSVar("DiscardMeByOpp") && !c.hasSVar("DiscardMe"));
+
+        CardCollection chosenToDiscard = new CardCollection();
+
+
+
+
+
+
         if (goodChoices.isEmpty()) {
             goodChoices = validCards;
         }
@@ -2325,6 +2436,76 @@ public class ComputerUtil {
         CardLists.sortByCmcDesc(goodChoices);
 
         return goodChoices.subList(0, max);
+    }
+
+    /**
+     * Sorts a card collection (typically an opponent's hand) by how much the AI wants to force the
+     * discarder to lose each card. Cards at the <b>front</b> are the most threatening — key deck
+     * cards, planeswalkers, and powerful creatures — and should be the first targets of forced
+     * discard. Cards at the <b>end</b> are benign: basic lands and cards marked with
+     * {@code DiscardMeByOpp} (cards the discarder actually wants to have discarded).
+     *
+     * @param chooser    the AI player who is forcing the discard
+     * @param discarder  the player who will lose the card
+     * @param sa         the spell/ability causing the discard
+     * @param validCards the cards eligible for discard (typically from the discarder's hand)
+     * @return {@code validCards} sorted in-place and returned, most desirable to force first
+     */
+    private static CardCollection sortHandByDiscardPreference(Player chooser, Player discarder, SpellAbility sa, CardCollection validCards) {
+        List<String> keyCards = discarder.getRegisteredPlayer().getDeck().getKeyCards();
+
+        // Score each card by how much it threatens the chooser; higher score → force-discard this one first
+        validCards.sort(Comparator.comparingInt((Card c) -> scoreCardForOpponentDiscard(c, keyCards)).reversed());
+        return validCards;
+    }
+
+    /**
+     * Scores a card from the discarder's hand by how threatening it is to the AI chooser.
+     * Higher score = the chooser most wants the discarder to lose this card.
+     */
+    private static int scoreCardForOpponentDiscard(final Card c, final List<String> keyCards) {
+        // Cards the opponent explicitly wants discarded (e.g. Madness) — do NOT force-discard them
+        if (c.hasSVar("DiscardMeByOpp")) {
+            return -300;
+        }
+        // Cards the owner doesn't care about discarding — low value to force
+        if (c.hasSVar("DiscardMe")) {
+            return 10;
+        }
+
+        // Lands are generally low-threat to strip from an opponent's hand
+        if (c.isLand()) {
+            // Nonbasic lands (dual/fetch) are slightly more valuable to strip
+            return c.isBasicLand() ? 20 : 45;
+        }
+
+        int score;
+
+        // Key deck cards (combo pieces, win conditions registered in the deck metadata)
+        if (keyCards.contains(c.getName())) {
+            // Force-discarding a key card is usually the best possible outcome — boost heavily
+            score = 900 + c.getCMC() * 10;
+        } else if (c.isPlaneswalker()) {
+            // Planeswalkers represent high long-term threat; strip them early
+            score = 700 + c.getCMC() * 15;
+        } else if (c.isCreature()) {
+            // Use the standard creature evaluator for an accurate power/toughness + ability estimate
+            score = 300 + ComputerUtilCard.evaluateCreature(c);
+        } else if (c.isEnchantment() || c.isArtifact()) {
+            // Non-creature permanents; value by CMC as a rough proxy for impact
+            score = 200 + c.getCMC() * 12;
+        } else {
+            // Instants and sorceries
+            score = 130 + c.getCMC() * 8;
+        }
+
+        // Reanimator targets are slightly more dangerous to discard FOR the owner (they get recursion),
+        // so we could leave them — but stripping them pre-emptively still has value; minor reduction
+        if (c.hasSVar("IsReanimatorCard")) {
+            score -= 20;
+        }
+
+        return score;
     }
 
     public static CardCollection getCardsToDiscardFromFriend(Player aiChooser, Player p, SpellAbility sa, CardCollection validCards, int min, int max) {
