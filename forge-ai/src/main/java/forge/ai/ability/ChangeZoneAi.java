@@ -2062,21 +2062,18 @@ public class ChangeZoneAi extends SpellAbilityAi {
         // Do a rough check of available mana sources (lands on battlefield, other mana producers on battlefield,
         // and lands in hand) to decide whether to prioritize fetching a land.
 
-        // Count lands already on the battlefield
-        int landsOnBattlefield = ai.getLandsInPlay().size();
-
         // Count non-land permanents on the battlefield that produce mana (e.g. mana rocks, dorks)
-        int otherManaProducers = 0;
+        int manaProducers = 0;
         for (Card c : ai.getCardsIn(ZoneType.Battlefield)) {
             if (!c.getManaAbilities().isEmpty()) {
-                otherManaProducers++;
+                manaProducers++;
             }
         }
 
         // Count lands in hand (they represent future mana sources we expect to play)
         int landsInHand = CardLists.filter(ai.getCardsIn(ZoneType.Hand), CardPredicates.LANDS).size();
 
-        int totalManaSources = landsOnBattlefield + otherManaProducers + landsInHand;
+        int totalManaSources = manaProducers + landsInHand;
 
         // Base threshold: below this many total mana sources we should prioritize getting a land
         int threshold = 4;
