@@ -1198,8 +1198,7 @@ public class SpecialCardAi {
     public static class MairsilThePretender {
         // Scan the fetch list for a card with at least one activated ability.
         // TODO: can be improved to a full consider(sa, ai) logic which would scan the graveyard first and hand last
-        public static Card considerCardFromList(final CardCollection fetchList) {
-            public static Card considerCardFromList(final CardCollection fetchList, SpellAbility sa) {
+        public static Card considerCardFromList(final CardCollection fetchList, SpellAbility sa) {
             CardCollectionView caged = CardLists.filter(sa.getActivatingPlayer().getCardsIn(ZoneType.Exile),
                     CardPredicates.hasCounter(CounterType.getType("CAGE")));
             return fetchList.stream().filter(CardPredicates.ARTIFACTS.or(CardPredicates.CREATURES))
