@@ -2086,14 +2086,9 @@ public class ChangeZoneAi extends SpellAbilityAi {
 
         // If we are below the threshold, look for a land in the available choices and prefer it
         if (totalManaSources < threshold) {
-            CardCollection landsInChoices = CardLists.filter(choices, CardPredicates.LANDS);
-            if (!landsInChoices.isEmpty()) {
-                // Prefer a land that produces mana over a purely tapped/utility land
-                CardCollection manaLands = CardLists.filter(landsInChoices, CardPredicates.LANDS_PRODUCING_MANA);
-                if (!manaLands.isEmpty()) {
-                    return manaLands.get(0);
-                }
-                return landsInChoices.get(0);
+            Card manaFixing = basicManaFixing(ai, choices);
+            if (manaFixing != null) {
+                return manaFixing;
             }
         }
 
